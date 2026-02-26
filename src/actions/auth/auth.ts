@@ -22,7 +22,37 @@ export async function login(formData: FormData) {
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) return { error: error.message };
 
-  return redirect("/");
+  // Check if user has completed onboarding
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('onboarding_completed')
+      .eq('id', user.id)
+      .single();
+    
+    if (profile && !profile.onboarding_completed) {
+      return redirect("/onboarding");
+    }
+  }
+
+  return redirect("/dashboard");
+}
+
+// 1B. GOOGLE LOGIN
+export async function loginWithGoogle() {
+  const origin = (await headers()).get("origin");
+  const supabase = await createClient();
+  
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${origin}/auth/confirm`,
+    },
+  });
+
+  if (error) return { error: error.message };
+  if (data.url) return redirect(data.url);
 }
 
 // 2. SIGNUP
@@ -36,12 +66,27 @@ export async function signup(formData: FormData) {
 
   const origin = (await headers()).get("origin");
   const supabase = await createClient();
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: { emailRedirectTo: `${origin}/auth/confirm` },
+    options: { 
+      emailRedirectTo: `${origin}/auth/confirm`,
+      data: {
+        full_name: formData.get("full_name") || "",
+      }
+    },
   });
   if (error) return { error: error.message };
+
+  // Create profile entry
+  if (data.user) {
+    await supabase.from('profiles').insert({
+      id: data.user.id,
+      full_name: formData.get("full_name") || "",
+      onboarding_completed: false,
+      onboarding_step: 0,
+    });
+  }
 
   return { success: "Check your email to verify your account." };
 }

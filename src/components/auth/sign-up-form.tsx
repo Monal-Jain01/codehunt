@@ -53,6 +53,10 @@ export function SignUpForm({
           <form onSubmit={handleSubmit}>
             <div className="flex flex-col gap-6">
               <div className="grid gap-2">
+                <Label htmlFor="full_name">Full Name</Label>
+                <Input id="full_name" name="full_name" type="text" placeholder="John Doe" required />
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor="email">Email</Label>
                 <Input id="email" name="email" type="email" placeholder="m@example.com" required />
               </div>

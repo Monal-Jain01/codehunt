@@ -9,44 +9,70 @@ export async function GET(request: NextRequest) {
   const next = searchParams.get("next") ?? "/";
   const code = searchParams.get("code");
 
-  // Origin nikalo (http://localhost:3000)
   const origin = request.nextUrl.origin;
-  const redirectTo = new URL(next, origin);
+  const supabase = await createClient();
 
-  // 1. Agar 'code' hai (PKCE Flow)
+  // 1. Handle PKCE Flow (OAuth - Google)
   if (code) {
-    const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     
-    if (!error) {
-      // Success!
-      return NextResponse.redirect(redirectTo);
+    if (!error && data.user) {
+      // Check if profile exists, create if not
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', data.user.id)
+        .single();
+
+      if (!profile) {
+        // Create profile for OAuth user
+        await supabase.from('profiles').insert({
+          id: data.user.id,
+          full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || '',
+          onboarding_completed: false,
+          onboarding_step: 0,
+        });
+        
+        // Redirect to onboarding
+        return NextResponse.redirect(new URL('/onboarding', origin));
+      }
+
+      // Check onboarding status
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profileData && !profileData.onboarding_completed) {
+        return NextResponse.redirect(new URL('/onboarding', origin));
+      }
+
+      return NextResponse.redirect(new URL('/dashboard', origin));
     } 
     
-    // Agar Error aaya, to use chupao mat, dikhao!
-    console.error("Auth Exchange Error:", error.message); 
+    console.error("Auth Exchange Error:", error?.message); 
     const errorUrl = new URL("/auth/error", origin);
-    errorUrl.searchParams.set("error", error.message);
+    errorUrl.searchParams.set("error", error?.message || "Authentication failed");
     return NextResponse.redirect(errorUrl);
   }
 
-  // 2. Agar 'token_hash' hai (Magic Link Flow)
+  // 2. Handle Magic Link Flow
   if (token_hash && type) {
-    const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({
       type,
       token_hash,
     });
     if (!error) {
+      const redirectTo = new URL(next, origin);
       return NextResponse.redirect(redirectTo);
     }
-    // Agar yahan error aaya
     const errorUrl = new URL("/auth/error", origin);
     errorUrl.searchParams.set("error", error.message);
     return NextResponse.redirect(errorUrl);
   }
 
-  // 3. Agar na code hai, na token_hash
+  // 3. No code or token
   const errorUrl = new URL("/auth/error", origin);
   errorUrl.searchParams.set("error", "No code or token detected");
   return NextResponse.redirect(errorUrl);
